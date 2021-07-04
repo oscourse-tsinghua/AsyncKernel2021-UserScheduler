@@ -1,0 +1,66 @@
+t1 read & sort & write start 0.001051839
+t2 read & sort & write start 0.001068223
+t1 read & sort & write finish 163.142220007
+t1 merge read start 163.142227253
+t1 merge read finish 163.284445346
+t2 read & sort & write finish 304.059624285
+t2 merge read start 304.059632723
+t2 merge read finish 304.373422987
+
+
+t2 read & sort & write start 0.000958824
+t1 read & sort & write start 0.000979565
+t1 read & sort & write finish 167.403631321
+t1 merge read start 167.403638317
+t1 merge read finish 167.54503174
+t2 read & sort & write finish 311.502859869
+t2 merge read start 311.502867178
+t2 merge read finish 311.785315044
+
+
+t2 read & sort & write start 0.000845083
+t1 read & sort & write start 0.000874658
+t1 read & sort & write finish 164.768394377
+t1 merge read start 164.768402072
+t1 merge read finish 164.915373566
+t2 read & sort & write finish 308.036936186
+t2 merge read start 308.036943333
+t2 merge read finish 308.302347592
+
+/******************************************************************/
+
+// 64M
+t1 read & sort & write start 0.000099937
+t2 read & sort & write start 0.000124206
+t1 read &  write finish 0.198764859
+t2 read & sort & write finish 0.331377255
+
+t1 read & sort & write start 0.000103963
+t2 read & sort & write start 0.000129926
+t1 read &  write finish 0.20276215
+t2 read & sort & write finish 0.332179526
+
+t1 read & sort & write start 0.000102237
+t2 read & sort & write start 0.000121971
+t1 read &  write finish 0.234993256
+t2 read & sort & write finish 0.340683911
+
+
+
+// 32MB
+t1 read & sort & write start 0.000105943
+t2 read & sort & write start 0.000126518
+t1 read &  write finish 0.190964425
+t2 read & sort & write finish 0.299615713
+
+t1 read & sort & write start 0.000108818
+t2 read & sort & write start 0.000124973
+t1 read &  write finish 0.200047887
+t2 read & sort & write finish 0.316531641
+
+t1 read & sort & write start 0.000099067
+t2 read & sort & write start 0.000118231
+t1 read &  write finish 0.172483956
+t2 read & sort & write finish 0.258734119
+
+//

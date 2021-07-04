@@ -1,0 +1,93 @@
+t1 fut join2 start          0.000215566
+t2 fut join5 start          0.000241883
+read sort1.txt start   0.000248163
+read sort1.txt start   0.000254346
+read sort2.txt start   0.000287717
+read sort2.txt start   0.000325358
+read sort2.txt start   0.000312752
+read sort2.txt start   0.000375617
+read sort2.txt start   0.000416223
+read sort1.txt finish  0.401277815
+read sort2.txt finish  0.401808293
+read sort2.txt finish  0.407415581
+read sort1.txt finish  0.407592781
+read sort2.txt finish  0.40925344
+read sort2.txt finish  0.409315868
+read sort2.txt finish  0.420426745
+read sort1.txt start   0.460344447
+read sort1.txt start   0.460354057
+read sort1.txt finish  0.467937655
+read sort1.txt finish  0.514211904
+t1 fut read sort1 finish         0.53705987
+read sort2.txt start   0.537034856
+read sort2.txt start   0.537096476
+read sort2.txt start   0.537121459
+read sort2.txt start   0.537110226
+read sort2.txt start   0.53710905
+read sort2.txt finish  0.551175609
+read sort2.txt finish  0.554124994
+read sort2.txt finish  0.554519183
+read sort2.txt finish  0.555194161
+read sort2.txt finish  0.588270257
+t2 fut read sort2 finish         0.606878949
+
+
+t2 fut join5 start          0.000206336
+t1 fut join2 start          0.000208037
+t2 fut1 read start 0.000305251
+t1 fut1 read start 0.000329784
+t2 fut2 read start 0.00034642
+t2 fut3 read start 0.000363996
+t2 fut4 read start 0.000376404
+t2 fut5 read start 0.000391081
+read sort2.txt start   0.000255553
+t1 fut2 read start 0.000441103
+read sort2.txt start   0.000308546
+read sort2.txt start   0.000310719
+read sort2.txt start   0.000332062
+read sort2.txt start   0.000362185
+read sort1.txt start   0.000363114
+read sort1.txt start   0.000446271
+read sort1.txt finish  0.145316426
+t1 fut2 read finish 0.154734326
+read sort2.txt finish  0.160472889
+read sort2.txt finish  0.161440324
+read sort2.txt finish  0.161452184
+read sort2.txt finish  0.161507515
+read sort1.txt finish  0.161950916
+read sort2.txt finish  0.162259299
+t2 fut1 read finish 0.168015265
+
+// 64M
+t2 fut join5 start          0.000221736
+t1 fut join2 start          0.000236392
+t1 fut read sort1 finish         0.611888175
+t2 fut read sort2 finish         0.685202737
+
+t1 fut join2 start          0.000195764
+t2 fut join5 start          0.000201148
+t1 fut read sort1 finish         0.549230217
+t2 fut read sort2 finish         0.621343671
+
+t1 fut join2 start          0.00021143
+t2 fut join5 start          0.000234849
+t1 fut read sort1 finish         0.545585178
+t2 fut read sort2 finish         0.621407719
+
+
+
+// 32M
+t1 fut join2 start          0.000183066
+t2 fut join5 start          0.000194565
+t1 fut read sort1 finish         162.693017613
+t2 fut read sort2 finish         272.760592342
+
+t1 fut join2 start          0.00021336
+t2 fut join5 start          0.000240204
+t1 fut read sort1 finish         164.809803096
+t2 fut read sort2 finish         275.30671437
+
+t1 fut join2 start          0.000217164
+t2 fut join5 start          0.000239315
+t1 fut read sort1 finish         161.30268124
+t2 fut read sort2 finish         271.914083185
