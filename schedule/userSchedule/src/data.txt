@@ -5,14 +5,14 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 use core::future::Future;
+use core::iter::FromIterator;
 use core::mem;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::collections::linked_list;
 use futures::future::MaybeDone;
 
-use crate::runtime::runtime::yield_thread;
 use crate::task::task::{t1_map_ptr,t2_map_ptr,PriorityMap};
-use crate::coroutine::coroutine::{CCB_list, checkYield, getPriorityByIndex, removeCCB};
 
 pub fn assert_future<T, F>(future: F) -> F
 where
@@ -36,7 +36,7 @@ where
     F: Future,
 {
     elems: Pin<Box<[MaybeDone<F>]>>,
-    tid:usize,
+    pub tid:usize,
 }
 
 impl<F> fmt::Debug for JoinAll<F>
@@ -92,7 +92,7 @@ where
     I::Item: Future,
 {
     let elems: Box<[_]> = i.into_iter().map(MaybeDone::Future).collect();
-    assert_future::<Vec<<I::Item as Future>::Output>, _>(JoinAll { elems: elems.into(), tid:t})
+    assert_future::<Vec<<I::Item as Future>::Output>, _>(JoinAll { elems: elems.into(),tid:t})
 }
 
 impl<F> Future for JoinAll<F>
@@ -103,40 +103,39 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut all_done = true;
-        // 优先级个数
-        let mut n = 5;
-        let tid = self.tid;
+
+        // 取得优先级map
+        let map;
+        unsafe {
+            let mut map_ptr= t1_map_ptr as *mut PriorityMap;
+            if self.tid == 2{
+                map_ptr = t2_map_ptr as *mut PriorityMap;
+            }
+            map = (*map_ptr).clone();
+        }
+        // 建立二维列表，第一维为优先级，第二维为future
         let mut future_list:Vec<Vec<Pin<&mut MaybeDone<F>>>> = vec![];
-        
-        // 根据优先级重排future顺序
-        for i in 0..n{
+        for i in 0..map.tier{
             future_list.push(vec![]);
         }
         // 遍历future，通过map得到优先级，插入到对应列表
         let mut i = 0;
         for elem in iter_pin_mut(self.elems.as_mut()) {
-            future_list.get_mut(getPriorityByIndex(tid, i)-1).unwrap().push(elem);
             i += 1;
+            future_list.get_mut(*map.pri.get(&i).unwrap()).unwrap().push(elem);
         }
-
         // 按照优先级执行future
-        for i in 0..n{
+        for i in 0..map.tier{
             match future_list.get_mut(i) {
                 Some(elem_list) => {
                     while elem_list.len() != 0 {
                         let elem = elem_list.pop().unwrap();
                         if elem.poll(cx).is_pending() {
                             all_done = false;
-                        }else {
-                            removeCCB(tid, i+1);
+                            break ;
                         }
-                        // 切换
-                        if checkYield(tid) {
-                            println!("线程{} yield",tid);
-                            yield_thread();
-                        }
-                        
-                    }           
+                    }
+                   
                 }
                 None =>{}
             }

@@ -18,6 +18,7 @@ struct Thread {
     state: State,
 }
 
+
 #[derive(Debug, Default)]
 #[repr(C)]
 struct ThreadContext {
@@ -40,6 +41,8 @@ impl Thread {
         }
     }
 }
+
+
 
 pub struct Runtime {
     threads: Vec<Thread>,
@@ -126,6 +129,7 @@ impl Runtime {
 
         let size = available.stack.len();
         unsafe {
+            // 取出线程栈指针s_ptr移到最高地址处
             let s_ptr = available.stack.as_mut_ptr().offset(size as isize);
             let s_ptr = (s_ptr as usize & !15) as *mut u8;
             std::ptr::write(s_ptr.offset(-16) as *mut u64, guard as u64);

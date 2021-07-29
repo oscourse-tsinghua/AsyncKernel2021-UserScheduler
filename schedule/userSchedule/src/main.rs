@@ -17,8 +17,11 @@ pub mod excutor{
 pub mod join{
     pub mod join;
 }
+pub mod coroutine{
+    pub mod coroutine;
+}
 
-use std::{future::{Future}, sync::{Arc, Mutex}};
+use std::{collections::linked_list, future::{Future}, sync::{Arc, Mutex}};
 
 use event::event::Event;
 use reactor::reactor::Reactor;
@@ -27,7 +30,7 @@ use runtime::runtime::{*};
 use excutor::excutor::my_run_util;
 //use join::join::join_all;
 
-use crate::{join::join::join_all, task::task::{Task_future, t1_map_ptr, t2_map_ptr}};
+use crate::{coroutine::coroutine::{CCB, getPriorityByCid}, join::join::join_all, task::task::{Task_future, t1_map_ptr, t2_map_ptr}};
 
 static mut rptr1:usize = 0;
 static mut rptr2:usize = 0;
@@ -53,6 +56,7 @@ fn main() {
         t1_map_ptr = map1_ptr as usize;
         t2_map_ptr = map2_ptr as usize;
     }
+
     // 创建runtime
     let mut runtime = Runtime::new();
     // 初始化全局指针RUNTIME
@@ -61,16 +65,17 @@ fn main() {
     runtime.spawn(|| {
         println!("线程1 开始");
 
-
-
-        // 创建协程任务
+        // 创建任务
         let futs = creatTask1(4, 1);
         // 插入fut调度
         let fut_scheduler = async {
             join_all(futs,1).await;
         };
-        // block_on使用线程的上下文运行
+        println!("线程1 yield");
+        yield_thread();
+        // 把block_on创建为用户线程
         my_run_util(fut_scheduler);
+
         println!("线程1 结束");
         
     }); 
@@ -83,6 +88,8 @@ fn main() {
         let fut_scheduler = async {
             join_all(futs,2).await;
         };
+        println!("线程2 yield");
+        yield_thread();
         // 把block_on创建为用户线程
         my_run_util(fut_scheduler);
         println!("线程2 结束");
@@ -104,20 +111,23 @@ fn creatTask1(n:usize, tid:usize) -> Vec<impl Future<Output = ()>>{
         // 克隆tid,cid
         let cid = (i+1).clone();
         let t = tid.clone();
-        let task_id = i.clone();
         // 创建协程
         let task = async move {
-            Task_future::new(task_id, t, cid,n-cid+1).await;
+            println!("线程{}   协程{}   优先级{}",t,cid,getPriorityByCid(t, cid));
         };
         tasks.push(task);
-        // 建立优先级map
-        unsafe {
-            let map_ptr = t1_map_ptr as *mut PriorityMap;
-            (*map_ptr).pri.insert(i, n-cid+1);
-        }
+        
     }
-    // 返回
+    // 创建CCB，并插入全局链表
+    set_priority1();
     tasks
+}
+
+fn set_priority1(){
+    CCB::new(1, 1, 2, 0).insert();
+    CCB::new(1, 2, 4, 1).insert();
+    CCB::new(1, 3, 1, 2).insert();
+    CCB::new(1, 4, 5, 3).insert();
 }
 
 fn creatTask2(n:usize, tid:usize) -> Vec<impl Future<Output = ()>>{
@@ -132,19 +142,23 @@ fn creatTask2(n:usize, tid:usize) -> Vec<impl Future<Output = ()>>{
         // 克隆tid,cid
         let cid = (i+1).clone();
         let t = tid.clone();
-        let task_id = (i+n).clone();
         // 创建协程
         let task = async move {
-            Task_future::new(task_id, t, cid,n-cid+1).await;
+            println!("线程{}   协程{}   优先级{}",t,cid,getPriorityByCid(t, cid));
         };
         tasks.push(task);
-        // 建立优先级map
-        unsafe {
-            let map_ptr = t2_map_ptr as *mut PriorityMap;
-            (*map_ptr).pri.insert(i, n-cid+1);
-        }
+        
     }
+    // CCB
+    set_priority2();
     tasks
+}
+
+fn set_priority2(){
+    CCB::new(2, 1, 5, 0).insert();
+    CCB::new(2, 2, 3, 1).insert();
+    CCB::new(2, 3, 2, 2).insert();
+    CCB::new(2, 4, 4, 3).insert();
 }
 
 
