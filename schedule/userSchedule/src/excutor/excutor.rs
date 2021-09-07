@@ -1,6 +1,6 @@
 
 use std::{future::Future, pin::Pin, sync::{Arc, Condvar, Mutex}, task::{Context, Poll, RawWaker, RawWakerVTable, Waker}};
-use crate::runtime::runtime::yield_thread;
+use crate::runtime::yield_thread;
 
 pub fn my_run_util<F: Future>(mut future: F) -> F::Output {
         // 从最内层parker开始创建上下文
@@ -17,7 +17,6 @@ pub fn my_run_util<F: Future>(mut future: F) -> F::Output {
                 Poll::Pending => {
                     //parker.park();
                     yield_thread();
-                    println!("block_on线程内所有协程都在等待,yield");
                 }
             };
             

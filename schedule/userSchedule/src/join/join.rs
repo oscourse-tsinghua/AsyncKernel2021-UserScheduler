@@ -130,7 +130,7 @@ where
                         }else {
                             removeCCB(tid, i+1);
                         }
-                        // 切换
+                        // 检查是否需要切换线程
                         if checkYield(tid) {
                             println!("线程{} yield",tid);
                             yield_thread();

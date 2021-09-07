@@ -1,71 +1,75 @@
+use std::{collections::VecDeque, sync::{Arc, Mutex}, task::{Context, Poll}};
 
-const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
-const MAX_THREADS: usize = 512;
-// 由于用户线程无法提供Arc使多线程访问共享变量，所以使用静态全局变量
+use futures::{task::{ArcWake, waker_ref}};
+
+use crate::kernel_task::{KernelThread, Task, TaskState};
+
+
+//const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
+//const MAX_THREADS: usize = 512;
+// 运行时全局指针
 pub static mut RUNTIME: usize = 0;
 
-#[derive(PartialEq, Eq, Debug)]
-enum State {
-    Available,
-    Running,
-    Ready,
+pub struct TaskMeta {
+    // 线程和任务队列都要保存Task
+    pub task: Arc<Task>,
+    pub thread: Arc<Mutex<KernelThread>>,
+    pub thread_id: usize,
 }
 
-struct Thread {
-    id: usize,
-    stack: Vec<u8>,
-    ctx: ThreadContext,
-    state: State,
-}
-
-
-#[derive(Debug, Default)]
-#[repr(C)]
-struct ThreadContext {
-    rsp: u64,
-    r15: u64,
-    r14: u64,
-    r13: u64,
-    r12: u64,
-    rbx: u64,
-    rbp: u64,
-}
-
-impl Thread {
-    fn new(id: usize) -> Self {
-        Thread {
-            id,
-            stack: vec![0_u8; DEFAULT_STACK_SIZE],
-            ctx: ThreadContext::default(),
-            state: State::Available,
-        }
+impl TaskMeta {
+    pub fn new(_task: Arc<Task>) -> Arc<Self> {
+        Arc::new(TaskMeta {
+            thread: _task.thread.clone(),
+            task: _task.clone(),
+            thread_id: _task.thread.lock().as_ref().unwrap().id.0,
+        })
+    }
+    // 任务唤醒函数的封装。即设置任务状态为可运行Ready
+    pub unsafe fn do_wake(self: Arc<Self>) {
+        set_task_state(self.task.clone(), TaskState::Ready);
     }
 }
 
-
+/// 设置任务状态
+pub fn set_task_state(task: Arc<Task>, state: TaskState) {
+    *task.state.lock().unwrap() = state;
+    
+}
+// 实现此trait才可以调用 waker_ref 创建waker
+impl ArcWake for TaskMeta {
+    fn wake_by_ref(arc_tm: &Arc<Self>) {
+        unsafe {
+            arc_tm.clone().do_wake();
+        }
+    }
+    
+}
 
 pub struct Runtime {
-    threads: Vec<Thread>,
-    current: usize,
+    pub tasks: VecDeque<Arc<TaskMeta>>,
+    pub current: Arc<TaskMeta>,
 }
 
 impl Runtime {
+    /// 封装Task为任务队列中的TaskMeta，并插入任务队列
+    pub fn add_task(&mut self, task: Arc<Task>){
+        let metadata = TaskMeta::new(task);
+        self.tasks.push_back(metadata);
+    }
+
     pub fn new() -> Self {
-        let base_thread = Thread {
-            id: 0,
-            stack: vec![0_u8; DEFAULT_STACK_SIZE],
-            ctx: ThreadContext::default(),
-            state: State::Running,
+        // 创建第0个task插入
+        let idle_task = Task::idle(||{});
+        let idle_mt = TaskMeta::new(idle_task.clone());
+        let mut deque = VecDeque::new();
+        deque.push_back(idle_mt.clone());
+        let rt = Runtime {
+            tasks: deque,
+            current: idle_mt.clone(),
         };
 
-        let mut threads = vec![base_thread];
-        let mut available_threads: Vec<Thread> = (1..MAX_THREADS).map(|i| Thread::new(i)).collect();
-        threads.append(&mut available_threads);
-
-        Runtime {
-            threads,
-            current: 0,
-        }
+        rt
     }
 
     pub fn init(&self) {
@@ -74,82 +78,49 @@ impl Runtime {
             RUNTIME = r_ptr as usize;
         }
     }
-
+    /// 启动运行时
     pub fn run(&mut self) -> ! {
         while self.t_yield() {}
         println!("runtime run finish");
         std::process::exit(0);
     }
-
-    fn t_return(&mut self) {
-        if self.current != 0 {
-            self.threads[self.current].state = State::Available;
-            self.t_yield();
-        }
-    }
-    
+    /// 查找下一个可以执行的任务并执行
     fn t_yield(&mut self) -> bool {
-        let mut pos = self.current;
-        while self.threads[pos].state != State::Ready {
-            pos += 1;
-            if pos == self.threads.len() {
-                pos = 0;
-            }
-            if pos == self.current {
-                return false;
-            }
+        if self.is_empty() {
+            return false;
         }
 
-        if self.threads[self.current].state != State::Available {
-            self.threads[self.current].state = State::Ready;
+        if self.tasks.front().unwrap().thread_id == 1 {
+            let prev_task = self.tasks.pop_front().unwrap();
+            self.tasks.push_back(prev_task);
         }
 
-        self.threads[pos].state = State::Running;
-        let old_pos = self.current;
-        self.current = pos;
-
-        unsafe {
-            let old: *mut ThreadContext = &mut self.threads[old_pos].ctx;
-            let new: *const ThreadContext = &self.threads[pos].ctx;
-            llvm_asm!(
-                "mov $0, %rdi
-                 mov $1, %rsi"::"r"(old), "r"(new)
-            );
-            switch();
+        let next_task = self.tasks.pop_front().unwrap();
+        if next_task.thread_id == 1 {
+            return false;
         }
-        self.threads.len() > 0
+
+        // 注册waker
+        let waker = waker_ref(&next_task);
+        let cx = &mut Context::from_waker(&*waker);
+        // 执行任务
+        self.current = next_task.clone();
+        let res = next_task.task.future.try_lock().unwrap().as_mut().poll(cx);
+        
+        if let Poll::Pending = res {
+            // 如果任务未完成，重新插入队列
+            self.tasks.push_back(next_task);
+        }
+
+        !self.is_empty()
     }
-
-    pub fn spawn(&mut self, f: fn()) {
-        let available = self
-            .threads
-            .iter_mut()
-            .find(|t| t.state == State::Available)
-            .expect("no available thread.");
-
-        let size = available.stack.len();
-        unsafe {
-            // 取出线程栈指针s_ptr移到最高地址处
-            let s_ptr = available.stack.as_mut_ptr().offset(size as isize);
-            let s_ptr = (s_ptr as usize & !15) as *mut u8;
-            std::ptr::write(s_ptr.offset(-16) as *mut u64, guard as u64);
-            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64);
-            std::ptr::write(s_ptr.offset(-32) as *mut u64, f as u64);
-            available.ctx.rsp = s_ptr.offset(-32) as u64;
-        }
-        available.state = State::Ready;
+    /// 任务队列是否为空
+    pub fn is_empty(&self) -> bool {
+        self.tasks.len() <= 1
     }
 }
 
-#[naked]
-fn skip() { }
 
-fn guard() {
-    unsafe {
-        let rt_ptr = RUNTIME as *mut Runtime;
-        (*rt_ptr).t_return();
-    };
-}
 
 pub fn yield_thread() {
     unsafe {
@@ -159,6 +130,7 @@ pub fn yield_thread() {
 }
 
 #[naked]
+#[allow(unsupported_naked_functions)]
 #[inline(never)]
 unsafe fn switch() {
     llvm_asm!("
