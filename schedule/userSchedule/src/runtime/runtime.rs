@@ -1,154 +1,223 @@
-use std::{collections::VecDeque, sync::{Arc, Mutex}, task::{Context, Poll}};
+use std::cell::RefCell;
 
-use futures::{task::{ArcWake, waker_ref}};
-
-use crate::kernel_task::{KernelThread, Task, TaskState};
+use crate::{NOYIFY, my_thread::*, scheduler::{SCHED, Scheduler}};
 
 
-//const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2;
-//const MAX_THREADS: usize = 512;
-// 运行时全局指针
-pub static mut RUNTIME: usize = 0;
 
-pub struct TaskMeta {
-    // 线程和任务队列都要保存Task
-    pub task: Arc<Task>,
-    pub thread: Arc<Mutex<KernelThread>>,
-    pub thread_id: usize,
-}
-
-impl TaskMeta {
-    pub fn new(_task: Arc<Task>) -> Arc<Self> {
-        Arc::new(TaskMeta {
-            thread: _task.thread.clone(),
-            task: _task.clone(),
-            thread_id: _task.thread.lock().as_ref().unwrap().id.0,
-        })
-    }
-    // 任务唤醒函数的封装。即设置任务状态为可运行Ready
-    pub unsafe fn do_wake(self: Arc<Self>) {
-        set_task_state(self.task.clone(), TaskState::Ready);
-    }
-}
-
-/// 设置任务状态
-pub fn set_task_state(task: Arc<Task>, state: TaskState) {
-    *task.state.lock().unwrap() = state;
-    
-}
-// 实现此trait才可以调用 waker_ref 创建waker
-impl ArcWake for TaskMeta {
-    fn wake_by_ref(arc_tm: &Arc<Self>) {
-        unsafe {
-            arc_tm.clone().do_wake();
-        }
-    }
-    
-}
+thread_local! {pub static RUNTIME: RefCell<usize> = RefCell::new(0);}
 
 pub struct Runtime {
-    pub tasks: VecDeque<Arc<TaskMeta>>,
-    pub current: Arc<TaskMeta>,
+    pub threads: Vec<MyThread>,
+    pub blocked: Vec<MyThread>,
+    pub current: usize,
 }
 
 impl Runtime {
-    /// 封装Task为任务队列中的TaskMeta，并插入任务队列
-    pub fn add_task(&mut self, task: Arc<Task>){
-        let metadata = TaskMeta::new(task);
-        self.tasks.push_back(metadata);
-    }
-
     pub fn new() -> Self {
-        // 创建第0个task插入
-        let idle_task = Task::idle(||{});
-        let idle_mt = TaskMeta::new(idle_task.clone());
-        let mut deque = VecDeque::new();
-        deque.push_back(idle_mt.clone());
-        let rt = Runtime {
-            tasks: deque,
-            current: idle_mt.clone(),
-        };
+        // 主线程，用于在上下文切换时保存主程序执行流程
+        // 区别于使用 spawn 创建的线程，后者执行的是 thread_main 函数
+        let mut main_thread = MyThread::new(0);
+        main_thread.state = State::Running;
 
-        rt
+        Self {
+            threads: vec![main_thread],
+            blocked: vec![],
+            current: 0,
+        }
     }
 
     pub fn init(&self) {
-        unsafe {
-            let r_ptr: *const Runtime = self;
-            RUNTIME = r_ptr as usize;
-        }
+        let r_ptr: *const Runtime = self;
+        RUNTIME.with(move |r|r.replace(r_ptr as usize));
     }
-    /// 启动运行时
-    pub fn run(&mut self) -> ! {
-        while self.t_yield() {}
-        println!("runtime run finish");
-        std::process::exit(0);
+
+    pub fn run(&mut self) {
+
+        loop {
+            // 获取调度器
+            let s_ptr;
+            // 得到任务队列长度
+            let tasks_len;
+            unsafe {
+                s_ptr = SCHED as *mut Scheduler;
+                tasks_len = (*s_ptr).list.lock().unwrap().len();
+            }
+            
+            if self.threads.len() > 1 {
+                // 如果当前进程存在可以执行的线程，一般来自于从阻塞队列恢复的线程，或是新创建的线程
+                println!("存在就绪线程");
+                self.t_yield();
+            } else if tasks_len != 0 {
+                // 如果线程列表为空，但任务队列不空，创建一个线程
+                println!("就绪线程数 == 0，创建线程绑定协程执行");
+                self.spawn(thread_main);
+            } else if self.blocked.len() == 0 {
+                // 没有需要运行的协程，运行时结束
+                break ;
+            } else {
+                // 存在阻塞线程，查看 NOTIFY
+                unsafe {
+                    if NOYIFY == 1 { self.notify(); }
+                }
+            }
+        }
+
+        //std::process::exit(0);
     }
-    /// 查找下一个可以执行的任务并执行
-    fn t_yield(&mut self) -> bool {
-        if self.is_empty() {
-            return false;
-        }
 
-        if self.tasks.front().unwrap().thread_id == 1 {
-            let prev_task = self.tasks.pop_front().unwrap();
-            self.tasks.push_back(prev_task);
-        }
+    /// 回收线程控制块，并重新启动运行时执行线程
+    pub fn t_return(&mut self) {
 
-        let next_task = self.tasks.pop_front().unwrap();
-        if next_task.thread_id == 1 {
-            return false;
-        }
-
-        // 注册waker
-        let waker = waker_ref(&next_task);
-        let cx = &mut Context::from_waker(&*waker);
-        // 执行任务
-        self.current = next_task.clone();
-        let res = next_task.task.future.try_lock().unwrap().as_mut().poll(cx);
+        println!("协程执行结束，退出并删除线程 {}", self.threads[self.current].id);
+        let delete_pos = self.current;
+        let pos = 0;
+        self.threads[pos].state = State::Ready;
+        self.current = 0;
         
-        if let Poll::Pending = res {
-            // 如果任务未完成，重新插入队列
-            self.tasks.push_back(next_task);
+        let temp_ctx = &mut ThreadContext::default();
+        
+        // 删除当前线程
+        self.threads.remove(delete_pos);
+        // 切换到线程0
+        unsafe {
+            let old: *mut ThreadContext = temp_ctx;
+            let new: *const ThreadContext = self.threads[pos].ctx.as_ref().get_ref();
+            llvm_asm!(
+                "mov $0, %rdi
+                 mov $1, %rsi"::"r"(old), "r"(new)
+            );
+            switch();
+        }
+    }
+
+    // 寻找可以执行的线程进行切换
+    pub fn t_yield(&mut self) {
+        // 寻找下一个可以执行的线程
+        let mut pos = 1;
+        while pos < self.threads.len() {
+            if self.threads[pos].state == State::Ready {
+                break;
+            }
+            pos += 1;
+        }
+        // 没有可以继续执行的线程
+        if pos == self.threads.len() { return ; }
+
+        let old_pos = self.current;
+        self.threads[old_pos].state = State::Ready;
+
+        self.threads[pos].state = State::Running;
+        self.current = pos;
+        unsafe {
+            let old: *mut ThreadContext = self.threads[old_pos].ctx.as_mut().get_mut();
+            let new: *const ThreadContext = self.threads[pos].ctx.as_ref().get_ref();
+            llvm_asm!(
+                "mov $0, %rdi
+                 mov $1, %rsi"::"r"(old), "r"(new)
+            );
+            switch();
+        }
+    }
+
+    /// 阻塞当前线程
+    pub fn block(&mut self) {
+        let pos = 0;
+
+        let old_pos = self.current;
+        self.threads[old_pos].state = State::Ready;
+
+        self.threads[pos].state = State::Running;
+        self.current = pos;
+
+        let mut t = self.threads.drain(old_pos..=old_pos).collect::<Vec<MyThread>>();
+        //self.threads.push(t);
+        //let len = self.threads.len();
+        self.blocked.append(&mut t);
+        let len = self.blocked.len();
+
+        unsafe {
+            let old: *mut ThreadContext = self.blocked[len-1].ctx.as_mut().get_mut();
+            let new: *const ThreadContext = self.threads[pos].ctx.as_ref().get_ref();
+            llvm_asm!(
+                "mov $0, %rdi
+                 mov $1, %rsi"::"r"(old), "r"(new)
+            );
+            switch();
+        }
+    }
+
+    /// 唤醒阻塞队列中的线程
+    pub fn notify(&mut self) {
+        self.threads.append(&mut self.blocked);
+    }
+
+    /// 切换线程执行
+    #[allow(dead_code)]
+    pub fn thread_run(&mut self) {
+        let mut pos = 1;
+        while pos < self.threads.len() {
+            if self.threads[pos].state == State::Ready { break; }
+            pos += 1;
         }
 
-        !self.is_empty()
+        if pos == self.threads.len() {
+            // 如果没有可以执行的线程，退出
+            return ;
+        }
+        
+        self.threads[pos].state = State::Running;
+        let old_pos = self.current;
+        self.current = pos;
+
+        unsafe {
+            let old: *mut ThreadContext = self.threads[old_pos].ctx.as_mut().get_mut();
+            let new: *const ThreadContext = self.threads[pos].ctx.as_ref().get_ref();
+            llvm_asm!(
+                "mov $0, %rdi
+                 mov $1, %rsi"::"r"(old), "r"(new)
+            );
+            switch();
+        }  
     }
-    /// 任务队列是否为空
-    pub fn is_empty(&self) -> bool {
-        self.tasks.len() <= 1
+
+    /// 由于运行时线程列表为空，且任务队列不空，创建一个线程插入到列表准备执行
+    pub fn spawn(&mut self, f:fn() )
+    {
+        let mut available = MyThread::new(self.threads.len() + self.blocked.len());
+
+        let size = available.stack.len();
+        unsafe {
+            let s_ptr = available.stack.as_mut_ptr().offset(size as isize);
+            let s_ptr = (s_ptr as usize & !15) as *mut u8;
+            std::ptr::write(s_ptr.offset(-16) as *mut u64, guard as u64);
+            std::ptr::write(s_ptr.offset(-24) as *mut u64, skip as u64);
+            std::ptr::write(s_ptr.offset(-32) as *mut u64, f as u64);
+            available.ctx.rsp = s_ptr.offset(-32) as u64;
+        }
+        available.state = State::Ready;
+
+        // 插入运行时
+        self.threads.push(available);
     }
-}
-
-
-
-pub fn yield_thread() {
-    unsafe {
-        let rt_ptr = RUNTIME as *mut Runtime;
-        (*rt_ptr).t_yield();
-    };
 }
 
 #[naked]
 #[allow(unsupported_naked_functions)]
-#[inline(never)]
-unsafe fn switch() {
-    llvm_asm!("
-        mov     %rsp, 0x00(%rdi)
-        mov     %r15, 0x08(%rdi)
-        mov     %r14, 0x10(%rdi)
-        mov     %r13, 0x18(%rdi)
-        mov     %r12, 0x20(%rdi)
-        mov     %rbx, 0x28(%rdi)
-        mov     %rbp, 0x30(%rdi)
+fn skip() { }
 
-        mov     0x00(%rsi), %rsp
-        mov     0x08(%rsi), %r15
-        mov     0x10(%rsi), %r14
-        mov     0x18(%rsi), %r13
-        mov     0x20(%rsi), %r12
-        mov     0x28(%rsi), %rbx
-        mov     0x30(%rsi), %rbp
-        "
-    );
+/// 任务队列为空，thread_main退出循环并结束，返回运行时寻找可以执行的下一个线程
+fn guard() {
+    unsafe {
+        let rt_ptr = RUNTIME.with(|r| *r.borrow()) as *mut Runtime;
+        (*rt_ptr).t_return();
+    };
+    
+}
+
+#[allow(dead_code)]
+pub fn yield_thread() {
+    unsafe {
+        let rt_ptr = RUNTIME.with(|r| *r.borrow()) as *mut Runtime;
+        (*rt_ptr).t_yield();
+    };
 }

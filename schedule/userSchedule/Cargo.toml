@@ -1,5 +1,5 @@
 [package]
-name = "userSchedule"
+name = "greenthread"
 version = "0.1.0"
 authors = ["AmoyCherry <840014803@qq.com>"]
 edition = "2018"
