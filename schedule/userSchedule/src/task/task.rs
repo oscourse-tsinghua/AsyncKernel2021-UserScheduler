@@ -21,6 +21,7 @@ pub struct Task {
     pub id: TaskId,
     pub future: Mutex<Pin<Box<dyn Future<Output = ()> + 'static + Send + Sync>>>,
     pub process: usize,
+    // pub priority: usize,
 }
 
 #[allow(dead_code)]

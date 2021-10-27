@@ -1,12 +1,24 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::atomic::AtomicUsize};
 
 use crate::{NOYIFY, my_thread::*, scheduler::{SCHED, Scheduler}};
 
 
-
+// 每一个物理核拥有运行一个独立的Runtime
 thread_local! {pub static RUNTIME: RefCell<usize> = RefCell::new(0);}
 
+pub struct CoreId(pub usize);
+
+impl CoreId {
+    pub fn new() -> Self {
+        static COUNTER: AtomicUsize = AtomicUsize::new(1);
+        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        Self(id)
+    }
+}
+
 pub struct Runtime {
+    pub core_id: CoreId,
     pub threads: Vec<MyThread>,
     pub blocked: Vec<MyThread>,
     pub current: usize,
@@ -20,6 +32,7 @@ impl Runtime {
         main_thread.state = State::Running;
 
         Self {
+            core_id: CoreId::new(),
             threads: vec![main_thread],
             blocked: vec![],
             current: 0,
@@ -45,11 +58,11 @@ impl Runtime {
             
             if self.threads.len() > 1 {
                 // 如果当前进程存在可以执行的线程，一般来自于从阻塞队列恢复的线程，或是新创建的线程
-                println!("存在就绪线程");
+                println!("core: {}, 存在就绪线程", self.core_id.0);
                 self.t_yield();
             } else if tasks_len != 0 {
                 // 如果线程列表为空，但任务队列不空，创建一个线程
-                println!("就绪线程数 == 0，创建线程绑定协程执行");
+                println!("core: {}, 就绪线程数 == 0，创建线程绑定协程执行", self.core_id.0);
                 self.spawn(thread_main);
             } else if self.blocked.len() == 0 {
                 // 没有需要运行的协程，运行时结束
@@ -68,7 +81,7 @@ impl Runtime {
     /// 回收线程控制块，并重新启动运行时执行线程
     pub fn t_return(&mut self) {
 
-        println!("协程执行结束，退出并删除线程 {}", self.threads[self.current].id);
+        println!("core: {}, 协程执行结束，退出并删除线程: {}", self.core_id.0, self.threads[self.current].id);
         let delete_pos = self.current;
         let pos = 0;
         self.threads[pos].state = State::Ready;
@@ -103,6 +116,11 @@ impl Runtime {
         // 没有可以继续执行的线程
         if pos == self.threads.len() { return ; }
 
+        //let sp_val = self.threads[pos].ctx.rsp;
+        //let mask = (1 << 28) - 1;
+        //let tid = (sp_val & mask) >> 20;
+        println!("core: {}, 线程: {}，切换/被唤醒", self.core_id.0, self.threads[pos].id);
+
         let old_pos = self.current;
         self.threads[old_pos].state = State::Ready;
 
@@ -125,6 +143,11 @@ impl Runtime {
 
         let old_pos = self.current;
         self.threads[old_pos].state = State::Ready;
+
+        //let sp_val = self.threads[old_pos].ctx.rsp;
+        //let mask = (1 << 28) - 1;
+        //let tid = (sp_val & mask) >> 20;
+        println!("core: {}, 线程: {}，被阻塞", self.core_id.0, self.threads[old_pos].id);
 
         self.threads[pos].state = State::Running;
         self.current = pos;

@@ -92,20 +92,38 @@ pub fn thread_main() {
         unsafe {
             let r_ptr = RUNTIME.with(|r| *r.borrow()) as *mut Runtime;
             let pos = (*r_ptr).current;
-            let tid = (*r_ptr).threads[pos].id;
-            println!("线程 {}，从调度器取走协程执行", tid);
+            //let sp_val = (*r_ptr).threads[pos].ctx.rsp;
+            //let mask = (1 << 28) - 1;
+            //tid = (sp_val & mask) >> 20;
+            println!("core: {}, 线程: {}，协程 {} 开始执行", (*r_ptr).core_id.0, (*r_ptr).threads[pos].id, task.as_ref().unwrap().id.0);
             arc_t = Arc::new((*r_ptr).threads[(*r_ptr).current].clone());
         }
         let waker = waker_ref(&arc_t);
         let cx = &mut Context::from_waker(&*waker);
 
         let ret = task.as_mut().unwrap().future.lock().unwrap().as_mut().poll(cx);
+
+        let core_id;
+        let thread_id;
+        let task_id;
+        unsafe {
+            let r_ptr = RUNTIME.with(|r| *r.borrow()) as *mut Runtime;
+            let pos = (*r_ptr).current;
+            //let sp_val = (*r_ptr).threads[pos].ctx.rsp;
+            //let mask = (1 << 28) - 1;
+            //let tid = (sp_val & mask) >> 20;
+            core_id = (*r_ptr).core_id.0;
+            thread_id = (*r_ptr).threads[pos].id;
+            task_id = task.as_ref().unwrap().id.0;
+        }
         // 任务未完成，插回任务队列
         if let Poll::Pending = ret {
-            println!("协程主动让出，插回调度器");
+            println!("core: {}, 线程: {}，协程 {} 主动让出，插回调度器", core_id, thread_id, task_id);
             unsafe {
                 (*s_ptr).push(task.unwrap());
             }
+        } else {
+            println!("core: {}, 线程: {}，协程 {} 执行结束", core_id, thread_id, task_id);
         }
     }
 }
