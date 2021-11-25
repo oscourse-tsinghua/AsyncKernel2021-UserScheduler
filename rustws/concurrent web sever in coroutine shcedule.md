@@ -1,6 +1,6 @@
 # 一、 调度器架构
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2021-11-25-22-45-33-image.png)
+![](https://github.com/oscourse-tsinghua/AsyncKernel2021-UserScheduler/blob/master/img_src/调度器架构.png)
 
 协程调度器在用户态运行，为了支持协程运行，会创建若干内核线程运行于物理核之上，每个线程执行相同的函数`thread_main()`，作用是在一个loop中不断访问调度器，取出协程执行，如果协程主动让出，则插回调度器，取出下一个协程执行。
 
@@ -24,21 +24,21 @@
 
 ### 示例程序最好情况
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2021-11-25-23-52-34-image.png)
+![](https://github.com/oscourse-tsinghua/AsyncKernel2021-UserScheduler/blob/master/img_src/mac_示例.png)
 
 ### 协程调度器最好情况
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2021-11-25-23-53-29-image.png)
+![](https://github.com/oscourse-tsinghua/AsyncKernel2021-UserScheduler/blob/master/img_src/mac_协程.png)
 
 ## 3.2 centOS
 
 ### 示例程序最好情况
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2021-11-25-23-57-14-image.png)
+![](https://github.com/oscourse-tsinghua/AsyncKernel2021-UserScheduler/blob/master/img_src/centos_示例.png)
 
 ### 协程调度器最好情况
 
-![](/Users/wangwenzhi/Library/Application%20Support/marktext/images/2021-11-25-23-56-34-image.png)
+![](https://github.com/oscourse-tsinghua/AsyncKernel2021-UserScheduler/blob/master/img_src/centos_协程.png)
 
 
 
